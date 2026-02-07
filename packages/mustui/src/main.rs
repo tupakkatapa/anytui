@@ -82,24 +82,15 @@ impl MusicTui {
         // Initialize audio output first
         let (stream, handle) = OutputStream::try_default()?;
 
-        let (artists, albums, has_artists, need_path_input, music_root) =
-            if let Some(arg) = env::args().nth(1) {
-                let dir = expand_tilde(&arg);
-                let (artists, albums, has_artists) = scan_music_dir(&dir);
-                let is_empty = artists.is_empty() && albums.is_empty();
-                let root = if is_empty { None } else { Some(dir) };
-                (artists, albums, has_artists, is_empty, root)
-            } else {
-                // Check if current directory has music
-                let cwd = PathBuf::from(".");
-                let (artists, albums, has_artists) = scan_music_dir(&cwd);
-                let is_empty = artists.is_empty() && albums.is_empty();
-                if is_empty {
-                    (vec![], vec![], false, true, None)
-                } else {
-                    (artists, albums, has_artists, false, Some(cwd))
-                }
-            };
+        // Path argument is required (validated in main)
+        let arg = env::args()
+            .nth(1)
+            .expect("music directory argument required");
+        let dir = expand_tilde(&arg);
+        let (artists, albums, has_artists) = scan_music_dir(&dir);
+        let is_empty = artists.is_empty() && albums.is_empty();
+        let music_root = if is_empty { None } else { Some(dir) };
+        let need_path_input = is_empty;
 
         let status = if need_path_input {
             " Enter music directory path".to_string()
@@ -1542,7 +1533,36 @@ impl App for MusicTui {
     }
 }
 
+fn print_help() {
+    eprintln!(
+        "mustui - Music player TUI with MPRIS support
+
+USAGE:
+    mustui <MUSIC_DIR>
+
+ARGS:
+    <MUSIC_DIR>    Path to music directory
+
+OPTIONS:
+    -h, --help     Print this help message"
+    );
+}
+
 fn main() -> AppResult<()> {
+    let args: Vec<String> = env::args().collect();
+
+    // Check for help flag
+    if args.len() > 1 && (args[1] == "-h" || args[1] == "--help") {
+        print_help();
+        return Ok(());
+    }
+
+    // Require a path argument
+    if args.len() < 2 {
+        print_help();
+        std::process::exit(1);
+    }
+
     let app = MusicTui::new()?;
     tuigreat::app::run(app)
 }
