@@ -2,7 +2,7 @@
 
 Sick and tired of visually non-coherent GUI tools and managers which pull god-knows-what packages as their deps, not a fan of complicated CLI tools either. Luckily **anything can be TUI.**
 
-So here is some minimal TUI managers and tools for graphical desktop environments. Built with [Ratatui](https://ratatui.rs/) and a shared library for consistent look and feel.
+So here is some minimal TUI managers and tools for graphical desktop environments. Built with [Ratatui](https://ratatui.rs/) and a shared library for consistent look and feel. LMK if you feel like something is missing or not working.
 
 ## Packages
 
@@ -78,6 +78,7 @@ nix run github:tupakkatapa/anytui#nettui
 ```bash
 nix develop           # Enter dev shell (or use direnv)
 cargo build           # Build all packages
+cargo test            # Run tests
 pre-commit run -a     # Run lints (nixpkgs-fmt, rustfmt, clippy)
 ```
 

@@ -2,6 +2,7 @@ use std::process::Command;
 
 use crate::audio::{Sink, Source};
 use tuigreat::AppResult;
+use voltui::extract_sink_name;
 
 fn get_default_sink() -> AppResult<String> {
     let output = Command::new("pactl").args(["get-default-sink"]).output()?;
@@ -127,24 +128,6 @@ pub fn get_combined_modules() -> AppResult<Vec<(u32, String)>> {
         .collect();
 
     Ok(modules)
-}
-
-/// Extract `sink_name` from module arguments string.
-fn extract_sink_name(args: &str) -> String {
-    for part in args.split(|c: char| c.is_whitespace() || c == '\t') {
-        if let Some(name) = part.strip_prefix("sink_name=") {
-            return name.trim_matches('"').trim_matches('\'').to_string();
-        }
-    }
-    if let Some(start) = args.find("sink_name=") {
-        let rest = &args[start + 10..];
-        let end = rest
-            .find(|c: char| c.is_whitespace() || c == '\t')
-            .unwrap_or(rest.len());
-        let name = &rest[..end];
-        return name.trim_matches('"').trim_matches('\'').to_string();
-    }
-    "combined".to_string()
 }
 
 /// Remove a combined sink by module index.

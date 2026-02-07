@@ -1,3 +1,4 @@
+use kaltui::{format_number, parse_and_eval};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
@@ -50,7 +51,7 @@ impl CalcTui {
             return;
         }
 
-        match Self::parse_and_eval(&self.input.clone()) {
+        match parse_and_eval(&self.input) {
             Ok(value) => {
                 if value.is_finite() {
                     self.result = format_number(value);
@@ -70,142 +71,6 @@ impl CalcTui {
                 self.status = format!(" Error: {e}");
             }
         }
-    }
-
-    fn validate_parens(expr: &str) -> bool {
-        let mut depth = 0i32;
-        for c in expr.chars() {
-            match c {
-                '(' => depth += 1,
-                ')' => depth -= 1,
-                _ => {}
-            }
-            if depth < 0 {
-                return false;
-            }
-        }
-        depth == 0
-    }
-
-    fn parse_and_eval(expr: &str) -> Result<f64, &'static str> {
-        // Remove spaces and thousands separators
-        let expr = expr.replace([' ', '\''], "");
-        if expr.is_empty() {
-            return Err("Empty expression");
-        }
-
-        // Validate balanced parentheses
-        if !Self::validate_parens(&expr) {
-            return Err("Unmatched parentheses");
-        }
-
-        // Handle addition and subtraction (lowest precedence)
-        let mut depth: i32 = 0;
-        let mut last_op = None;
-        let bytes = expr.as_bytes();
-
-        for (i, &c) in bytes.iter().enumerate().rev() {
-            match c {
-                b')' => depth += 1,
-                b'(' => depth = depth.saturating_sub(1),
-                b'+' | b'-' if depth == 0 && i > 0 => {
-                    let prev = bytes[i - 1];
-                    if prev != b'+' && prev != b'-' && prev != b'*' && prev != b'/' && prev != b'('
-                    {
-                        last_op = Some((i, c as char));
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if let Some((i, op)) = last_op {
-            if i == 0 || i + 1 >= expr.len() {
-                return Err("Invalid expression");
-            }
-            let left = Self::parse_and_eval(&expr[..i])?;
-            let right = Self::parse_and_eval(&expr[i + 1..])?;
-            return Ok(match op {
-                '+' => left + right,
-                '-' => left - right,
-                _ => unreachable!(),
-            });
-        }
-
-        // Handle multiplication and division
-        depth = 0;
-        last_op = None;
-        for (i, &c) in bytes.iter().enumerate().rev() {
-            match c {
-                b')' => depth += 1,
-                b'(' => depth = depth.saturating_sub(1),
-                b'*' | b'/' if depth == 0 => {
-                    last_op = Some((i, c as char));
-                    break;
-                }
-                _ => {}
-            }
-        }
-
-        if let Some((i, op)) = last_op {
-            if i == 0 || i + 1 >= expr.len() {
-                return Err("Invalid expression");
-            }
-            let left = Self::parse_and_eval(&expr[..i])?;
-            let right = Self::parse_and_eval(&expr[i + 1..])?;
-            return Ok(match op {
-                '*' => left * right,
-                '/' => {
-                    if right.abs() < f64::EPSILON {
-                        return Err("Division by zero");
-                    }
-                    left / right
-                }
-                _ => unreachable!(),
-            });
-        }
-
-        // Handle exponentiation (right-to-left associativity, so scan left-to-right)
-        depth = 0;
-        last_op = None;
-        for (i, &c) in bytes.iter().enumerate() {
-            match c {
-                b'(' => depth += 1,
-                b')' => depth = depth.saturating_sub(1),
-                b'^' if depth == 0 => {
-                    last_op = Some((i, '^'));
-                    break;
-                }
-                _ => {}
-            }
-        }
-
-        if let Some((i, _)) = last_op {
-            if i == 0 || i + 1 >= expr.len() {
-                return Err("Invalid expression");
-            }
-            let left = Self::parse_and_eval(&expr[..i])?;
-            let right = Self::parse_and_eval(&expr[i + 1..])?;
-            let result = left.powf(right);
-            if !result.is_finite() {
-                return Err("Invalid result");
-            }
-            return Ok(result);
-        }
-
-        // Handle parentheses
-        if expr.starts_with('(') && expr.ends_with(')') {
-            return Self::parse_and_eval(&expr[1..expr.len() - 1]);
-        }
-
-        // Handle unary minus
-        if let Some(rest) = expr.strip_prefix('-') {
-            return Ok(-Self::parse_and_eval(rest)?);
-        }
-
-        // Parse number
-        expr.parse::<f64>().map_err(|_| "Invalid number")
     }
 
     fn handle_char(&mut self, c: char) {
@@ -431,57 +296,6 @@ impl CalcTui {
             None => self.history.len() - 1,
         };
         self.history_state.select(Some(i));
-    }
-}
-
-fn format_number(n: f64) -> String {
-    // Try to format as integer with thousands separator if it's a whole number
-    // Use epsilon comparison since float == 0.0 is unreliable
-    if n.fract().abs() < f64::EPSILON
-        && let Ok(int_val) = format!("{n:.0}").parse::<i64>()
-    {
-        return format_with_thousands(int_val);
-    }
-
-    // Fall back to decimal formatting
-    let s = format!("{n:.10}")
-        .trim_end_matches('0')
-        .trim_end_matches('.')
-        .to_string();
-
-    // Format the integer part with thousands separator
-    if let Some(dot_pos) = s.find('.') {
-        let (int_part, dec_part) = s.split_at(dot_pos);
-        if let Ok(i) = int_part.parse::<i64>() {
-            format!("{}{}", format_with_thousands(i), dec_part)
-        } else {
-            s
-        }
-    } else {
-        s
-    }
-}
-
-fn format_with_thousands(n: i64) -> String {
-    let (negative, abs_str) = if n == i64::MIN {
-        (true, "9223372036854775808".to_string())
-    } else {
-        (n < 0, n.abs().to_string())
-    };
-    let chars: Vec<char> = abs_str.chars().collect();
-    let mut result = String::new();
-
-    for (i, c) in chars.iter().enumerate() {
-        if i > 0 && (chars.len() - i).is_multiple_of(3) {
-            result.push('\'');
-        }
-        result.push(*c);
-    }
-
-    if negative {
-        format!("-{result}")
-    } else {
-        result
     }
 }
 
