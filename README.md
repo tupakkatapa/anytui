@@ -63,7 +63,7 @@ environment.systemPackages = with anytui.packages.x86_64-linux; [
 ```bash
 # Try without installing
 nix run github:tupakkatapa/anytui#voltui
-nix run github:tupakkatapa/anytui#nettui
+nix run github:tupakkatapa/anytui#mustui -- ~/Music
 
 # Common keybindings across all tools
 # j/k     - Navigate up/down
