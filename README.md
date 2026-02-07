@@ -1,30 +1,19 @@
 # anytui
 
-Sick and tired of visually non-coherent GUI tools and managers which pull god-knows-what packages as their deps, not a fan of complicated CLI tools either.
+Sick and tired of visually non-coherent GUI tools and managers which pull god-knows-what packages as their deps, not a fan of complicated CLI tools either. Luckily **anything can be TUI.**
 
-Luckily **Anything can be TUI.**
-
-Minimal terminal user interface managers and tools for graphical desktop environments. Built with [Ratatui](https://ratatui.rs/) and a shared library for consistent look and feel.
+So here is some minimal TUI managers and tools for graphical desktop environments. Built with [Ratatui](https://ratatui.rs/) and a shared library for consistent look and feel.
 
 ## Packages
 
-- **voltui** - Audio volume control (PipeWire/PulseAudio/ALSA)
-- **nettui** - Network manager (iwd/wpa_supplicant/NetworkManager)
-- **blutui** - Bluetooth manager
-- **mustui** - Music player with MPRIS support
+- **voltui** - Audio volume control via `pactl` (PipeWire/PulseAudio) or `amixer` (ALSA)
+- **nettui** - Network manager via `iwctl` (iwd), `wpa_cli`, or `nmcli` (NetworkManager)
+- **blutui** - Bluetooth manager (requires `bluetooth` service)
+- **mustui** - Music player with MPRIS support (requires D-Bus)
 - **caltui** - Calendar viewer
 - **kaltui** - Calculator
 
-All tools share common vim-style keybindings through the `tuigreat` shared library.
-
-## Runtime Requirements
-
-Some packages require system services. Both `nettui` and `voltui` detect available backends at runtime -- no compile-time configuration needed.
-
-- **voltui** - One of: `PipeWire`/`PulseAudio` (pactl) or `ALSA` (amixer)
-- **nettui** - One of: `iwd` (iwctl), `wpa_supplicant` (wpa_cli), or `NetworkManager` (nmcli)
-- **blutui** - `bluetooth` service enabled
-- **mustui** - Audio output (ALSA), D-Bus for MPRIS
+Some packages require system services. Both `nettui` and `voltui` detect available backends at runtime -- no compile-time configuration needed. All tools share common vim-style keybindings.
 
 ## Getting Started
 
@@ -33,7 +22,7 @@ Add this repository as a Nix flake input and apply the overlay to make packages 
 ```nix
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     anytui.url = "github:tupakkatapa/anytui";
     anytui.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -72,10 +61,9 @@ environment.systemPackages = with anytui.packages.x86_64-linux; [
 ## Usage
 
 ```bash
-# Run any tool directly
-voltui
-nettui
-mustui ~/Music
+# Try without installing
+nix run github:tupakkatapa/anytui#voltui
+nix run github:tupakkatapa/anytui#nettui
 
 # Common keybindings across all tools
 # j/k     - Navigate up/down
@@ -85,10 +73,12 @@ mustui ~/Music
 # ?       - Help
 ```
 
-## Building from Source
+## Contributing
 
 ```bash
-nix build .#voltui    # Build a single package
-nix develop           # Enter development shell
+nix develop           # Enter dev shell (or use direnv)
 cargo build           # Build all packages
+pre-commit run -a     # Run lints (nixpkgs-fmt, rustfmt, clippy)
 ```
+
+Pre-commit hooks are automatically installed via devenv.
