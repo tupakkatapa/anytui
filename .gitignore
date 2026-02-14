@@ -13,10 +13,8 @@ target/
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 
-# Devenv / direnv
-.devenv/
+# Direnv
 .direnv/
-.envrc
 .pre-commit-config.yaml
 
 # Claude Code

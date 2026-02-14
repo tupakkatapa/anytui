@@ -7,7 +7,7 @@ let
 in
 pkgs.rustPlatform.buildRustPackage rec {
   pname = manifest.name;
-  version = workspaceManifest.version;
+  inherit (workspaceManifest) version;
 
   nativeBuildInputs = with pkgs; [
     pkg-config
