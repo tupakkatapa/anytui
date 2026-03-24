@@ -60,6 +60,7 @@ struct NetTui {
     backend: Option<WifiBackend>,
     wifi: WifiState,
     scan_tick: u32,
+    iface_tick: u32,
     pending_refresh: PendingRefresh,
     // WiFi password input
     password_input: String,
@@ -103,6 +104,7 @@ impl NetTui {
                 scanning: false,
             },
             scan_tick: 0,
+            iface_tick: 0,
             pending_refresh: PendingRefresh::default(),
             password_input: String::new(),
             pending_ssid: String::new(),
@@ -208,7 +210,10 @@ impl NetTui {
                 if let (Some(iface), Some(backend)) = (self.selected_wifi_interface(), self.backend)
                 {
                     match backends::connect_wifi(backend, &iface.name, &network.ssid, None) {
-                        Ok(msg) => self.status = format!(" {msg}"),
+                        Ok(msg) => {
+                            self.status = format!(" {msg}");
+                            self.pending_refresh.ticks_remaining = 5;
+                        }
                         Err(e) => self.status = format!(" Failed: {e}"),
                     }
                 }
@@ -221,7 +226,10 @@ impl NetTui {
             let ssid = self.pending_ssid.clone();
             let pass = self.password_input.clone();
             match backends::connect_wifi(backend, &iface.name, &ssid, Some(&pass)) {
-                Ok(msg) => self.status = format!(" {msg}"),
+                Ok(msg) => {
+                    self.status = format!(" {msg}");
+                    self.pending_refresh.ticks_remaining = 5;
+                }
                 Err(e) => self.status = format!(" Failed: {e}"),
             }
         }
@@ -682,6 +690,15 @@ impl App for NetTui {
         if self.pending_refresh.ticks_remaining > 0 {
             self.pending_refresh.ticks_remaining -= 1;
             if self.pending_refresh.ticks_remaining == 0 {
+                self.refresh()?;
+            }
+        }
+
+        // Periodic interface refresh when on interfaces tab (~3s at 100ms tick)
+        if self.current_tab() == 0 {
+            self.iface_tick += 1;
+            if self.iface_tick >= 30 {
+                self.iface_tick = 0;
                 self.refresh()?;
             }
         }

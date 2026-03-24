@@ -41,6 +41,7 @@ struct BtTui {
     scanning: bool,
     tick_count: u32,
     discovery_tick: u32,
+    paired_tick: u32,
     // Pairing state
     pairing_in_progress: bool,
     pairing_device: String,
@@ -89,6 +90,7 @@ impl BtTui {
             scanning,
             tick_count: 0,
             discovery_tick: 0,
+            paired_tick: 0,
             pairing_in_progress: false,
             pairing_device: String::new(),
             pin_value: String::new(),
@@ -158,12 +160,16 @@ impl BtTui {
             1 => {
                 // Paired tab - connect/disconnect
                 if let Some(device) = self.paired.selected() {
+                    let addr = device.address.clone();
+                    let name = device.name.clone();
                     if device.connected {
-                        disconnect_device(&device.address)?;
-                        self.status = format!(" Disconnected from {}", device.name);
+                        disconnect_device(&addr)?;
+                        self.refresh()?;
+                        self.status = format!(" Disconnected from {name}");
                     } else {
-                        connect_device(&device.address)?;
-                        self.status = format!(" Connecting to {}...", device.name);
+                        connect_device(&addr)?;
+                        self.refresh()?;
+                        self.status = format!(" Connecting to {name}...");
                     }
                 }
             }
@@ -363,6 +369,16 @@ impl App for BtTui {
             self.pin_value = passkey;
             self.mode = UiMode::PinConfirm;
             self.status = format!(" Confirm PIN for {}", self.pairing_device);
+        }
+
+        // Periodic refresh of paired list (~2 seconds at 100ms tick rate)
+        if self.controller_powered && self.mode != UiMode::PinConfirm {
+            self.paired_tick += 1;
+            if self.paired_tick >= 20 {
+                self.paired_tick = 0;
+                let paired = get_paired_devices().unwrap_or_default();
+                self.paired.set_items(paired);
+            }
         }
 
         // Scanning logic

@@ -1,6 +1,5 @@
 use nettui::{
-    WifiNetwork, dbm_to_percent, parse_iwctl_networks, parse_nmcli_output, parse_wpa_scan_results,
-    split_escaped,
+    dbm_to_percent, parse_iwctl_networks, parse_nmcli_output, parse_wpa_scan_results, split_escaped,
 };
 
 // ============================================================================
