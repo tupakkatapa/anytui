@@ -3,14 +3,18 @@ use tuigreat::AppResult;
 
 use crate::network::WifiNetwork;
 
-pub fn scan_wifi(interface: &str) -> AppResult<Vec<WifiNetwork>> {
-    // Trigger rescan
+/// Ticks to wait after triggering scan before fetching results (~1000ms).
+pub const SCAN_DELAY_TICKS: u32 = 10;
+
+/// Trigger a Wi-Fi scan (non-blocking, returns immediately).
+pub fn trigger_scan(interface: &str) {
     let _ = Command::new("nmcli")
         .args(["dev", "wifi", "rescan", "ifname", interface])
         .output();
+}
 
-    std::thread::sleep(std::time::Duration::from_millis(1000));
-
+/// Fetch scan results (non-blocking, reads cached results from `NetworkManager`).
+pub fn get_networks(interface: &str) -> AppResult<Vec<WifiNetwork>> {
     let output = Command::new("nmcli")
         .args([
             "-t",
@@ -29,6 +33,19 @@ pub fn scan_wifi(interface: &str) -> AppResult<Vec<WifiNetwork>> {
     } else {
         Ok(vec![])
     }
+}
+
+/// Check if `NetworkManager` has a saved connection for this SSID.
+pub fn has_stored_credentials(ssid: &str) -> bool {
+    Command::new("nmcli")
+        .args(["-t", "-f", "NAME", "connection", "show"])
+        .output()
+        .ok()
+        .is_some_and(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .any(|line| line == ssid)
+        })
 }
 
 pub fn connect_wifi(interface: &str, ssid: &str, password: Option<&str>) -> AppResult<String> {

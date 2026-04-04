@@ -1,5 +1,6 @@
 use nettui::{
-    dbm_to_percent, parse_iwctl_networks, parse_nmcli_output, parse_wpa_scan_results, split_escaped,
+    dbm_to_percent, is_ssid_in_known_networks, parse_iwctl_networks, parse_nmcli_output,
+    parse_wpa_scan_results, split_escaped, strip_ansi,
 };
 
 // ============================================================================
@@ -180,4 +181,84 @@ fn test_dbm_conversion() {
     assert_eq!(dbm_to_percent(-30), 100);
     assert!(dbm_to_percent(-50) > 50);
     assert!(dbm_to_percent(-80) < 50);
+}
+
+// ============================================================================
+// strip_ansi tests
+// ============================================================================
+
+#[test]
+fn test_strip_ansi_plain_text() {
+    assert_eq!(strip_ansi("hello world"), "hello world");
+}
+
+#[test]
+fn test_strip_ansi_color_codes() {
+    assert_eq!(strip_ansi("\x1b[1;31mred\x1b[0m"), "red");
+}
+
+#[test]
+fn test_strip_ansi_mixed() {
+    assert_eq!(
+        strip_ansi("  \x1b[1mMyNetwork\x1b[0m            psk"),
+        "  MyNetwork            psk"
+    );
+}
+
+#[test]
+fn test_strip_ansi_empty() {
+    assert_eq!(strip_ansi(""), "");
+}
+
+// ============================================================================
+// is_ssid_in_known_networks tests
+// ============================================================================
+
+#[test]
+fn test_known_networks_found() {
+    let output = "\
+                Available known networks
+  ────────────────────────────────────────
+  Name                  Security  Hidden
+  ────────────────────────────────────────
+  MyNetwork             psk       no
+  OfficeWifi            psk       no";
+    assert!(is_ssid_in_known_networks(output, "MyNetwork"));
+    assert!(is_ssid_in_known_networks(output, "OfficeWifi"));
+}
+
+#[test]
+fn test_known_networks_not_found() {
+    let output = "\
+                Available known networks
+  ────────────────────────────────────────
+  Name                  Security  Hidden
+  ────────────────────────────────────────
+  MyNetwork             psk       no";
+    assert!(!is_ssid_in_known_networks(output, "Unknown"));
+}
+
+#[test]
+fn test_known_networks_prefix_no_false_positive() {
+    let output = "\
+                Available known networks
+  ────────────────────────────────────────
+  Name                  Security  Hidden
+  ────────────────────────────────────────
+  NetworkLong           psk       no";
+    assert!(!is_ssid_in_known_networks(output, "Network"));
+    assert!(is_ssid_in_known_networks(output, "NetworkLong"));
+}
+
+#[test]
+fn test_known_networks_empty_output() {
+    assert!(!is_ssid_in_known_networks("", "Anything"));
+}
+
+#[test]
+fn test_known_networks_no_data_rows() {
+    let output = "\
+  Name       Security
+  ──────────────────";
+    assert!(!is_ssid_in_known_networks(output, "Anything"));
 }

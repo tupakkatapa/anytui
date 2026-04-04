@@ -1,7 +1,7 @@
 pub mod alsa;
 pub mod pactl;
 
-use crate::audio::{AudioBackend, Sink, Source};
+use crate::audio::{AppStream, AudioBackend, Sink, Source};
 use tuigreat::AppResult;
 
 pub fn get_sinks(backend: AudioBackend) -> AppResult<Vec<Sink>> {
@@ -57,5 +57,26 @@ pub fn set_default_source(backend: AudioBackend, name: &str) -> Result<(), Strin
     match backend {
         AudioBackend::PulseAudio => pactl::set_default_source(name),
         AudioBackend::Alsa => Err("ALSA does not support setting default source".to_string()),
+    }
+}
+
+pub fn get_app_streams(backend: AudioBackend) -> AppResult<Vec<AppStream>> {
+    match backend {
+        AudioBackend::PulseAudio => pactl::get_app_streams(),
+        AudioBackend::Alsa => Ok(vec![]),
+    }
+}
+
+pub fn adjust_app_volume(backend: AudioBackend, index: u32, delta: i8) -> AppResult<()> {
+    match backend {
+        AudioBackend::PulseAudio => pactl::adjust_app_volume(index, delta),
+        AudioBackend::Alsa => Ok(()),
+    }
+}
+
+pub fn toggle_app_mute(backend: AudioBackend, index: u32) -> AppResult<()> {
+    match backend {
+        AudioBackend::PulseAudio => pactl::toggle_app_mute(index),
+        AudioBackend::Alsa => Ok(()),
     }
 }

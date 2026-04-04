@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use crate::audio::{Sink, Source};
+use crate::audio::{AppStream, Sink, Source};
 use tuigreat::AppResult;
 use voltui::extract_sink_name;
 
@@ -238,4 +238,68 @@ pub fn get_sources() -> AppResult<Vec<Source>> {
         .unwrap_or_default();
 
     Ok(sources)
+}
+
+pub fn get_app_streams() -> AppResult<Vec<AppStream>> {
+    let output = Command::new("pactl")
+        .args(["--format=json", "list", "sink-inputs"])
+        .output()?;
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).unwrap_or(serde_json::json!([]));
+
+    let streams = json
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|input| {
+                    let index = u32::try_from(input["index"].as_u64()?).ok()?;
+                    let muted = input["mute"].as_bool().unwrap_or(false);
+
+                    let volume = input["volume"]
+                        .as_object()
+                        .and_then(|v| v.values().next())
+                        .and_then(|ch| ch["value_percent"].as_str())
+                        .and_then(|s| {
+                            s.trim_end_matches('%')
+                                .parse::<u32>()
+                                .ok()
+                                .map(|v| v.min(100) as u8)
+                        })
+                        .unwrap_or(0);
+
+                    let props = &input["properties"];
+                    let app_name = props["application.name"]
+                        .as_str()
+                        .or_else(|| props["media.name"].as_str())
+                        .unwrap_or("Unknown")
+                        .to_string();
+
+                    Some(AppStream {
+                        index,
+                        app_name,
+                        volume,
+                        muted,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(streams)
+}
+
+pub fn adjust_app_volume(index: u32, delta: i8) -> AppResult<()> {
+    let vol = if delta > 0 { "+5%" } else { "-5%" };
+    Command::new("pactl")
+        .args(["set-sink-input-volume", &index.to_string(), vol])
+        .output()?;
+    Ok(())
+}
+
+pub fn toggle_app_mute(index: u32) -> AppResult<()> {
+    Command::new("pactl")
+        .args(["set-sink-input-mute", &index.to_string(), "toggle"])
+        .output()?;
+    Ok(())
 }

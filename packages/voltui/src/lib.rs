@@ -12,14 +12,14 @@ pub fn extract_sink_name(args: &str) -> String {
         let rest = &args[start + 10..];
 
         // Handle quoted values
-        if rest.starts_with('"') {
-            if let Some(end) = rest[1..].find('"') {
-                return rest[1..=end].to_string();
+        if let Some(inner) = rest.strip_prefix('"') {
+            if let Some(end) = inner.find('"') {
+                return inner[..end].to_string();
             }
-        } else if rest.starts_with('\'') {
-            if let Some(end) = rest[1..].find('\'') {
-                return rest[1..=end].to_string();
-            }
+        } else if let Some(inner) = rest.strip_prefix('\'')
+            && let Some(end) = inner.find('\'')
+        {
+            return inner[..end].to_string();
         }
 
         // Unquoted value - ends at whitespace or end of string

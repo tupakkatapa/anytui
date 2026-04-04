@@ -3,16 +3,18 @@ use tuigreat::AppResult;
 
 use crate::network::WifiNetwork;
 
-pub fn scan_wifi(interface: &str) -> AppResult<Vec<WifiNetwork>> {
-    // Trigger scan (iwd doesn't require sudo)
+/// Ticks to wait after triggering scan before fetching results (~500ms).
+pub const SCAN_DELAY_TICKS: u32 = 5;
+
+/// Trigger a Wi-Fi scan (non-blocking, returns immediately).
+pub fn trigger_scan(interface: &str) {
     let _ = Command::new("iwctl")
         .args(["station", interface, "scan"])
         .output();
+}
 
-    // Small delay to let scan complete
-    std::thread::sleep(std::time::Duration::from_millis(500));
-
-    // Get results
+/// Fetch scan results (non-blocking, reads cached results from iwd).
+pub fn get_networks(interface: &str) -> AppResult<Vec<WifiNetwork>> {
     let output = Command::new("iwctl")
         .args(["station", interface, "get-networks"])
         .output()?;
@@ -26,6 +28,19 @@ pub fn scan_wifi(interface: &str) -> AppResult<Vec<WifiNetwork>> {
     } else {
         Ok(vec![])
     }
+}
+
+/// Check if iwd has stored credentials for a network.
+pub fn has_stored_credentials(ssid: &str) -> bool {
+    let Ok(output) = Command::new("iwctl")
+        .args(["known-networks", "list"])
+        .output()
+    else {
+        return false;
+    };
+
+    let stdout = nettui::strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    nettui::is_ssid_in_known_networks(&stdout, ssid)
 }
 
 pub fn connect_wifi(interface: &str, ssid: &str, password: Option<&str>) -> AppResult<String> {

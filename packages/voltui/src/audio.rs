@@ -42,3 +42,12 @@ pub struct Source {
     pub muted: bool,
     pub is_default: bool,
 }
+
+/// A per-application audio stream (`PulseAudio` sink-input).
+#[derive(Clone)]
+pub struct AppStream {
+    pub index: u32,
+    pub app_name: String,
+    pub volume: u8,
+    pub muted: bool,
+}

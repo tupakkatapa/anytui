@@ -361,7 +361,7 @@ impl App for BtTui {
     }
 
     fn tick(&mut self) -> AppResult<()> {
-        // Check for pending passkey during pairing
+        // Check for pending passkey during pairing (non-blocking channel poll)
         if self.pairing_in_progress
             && self.mode != UiMode::PinConfirm
             && let Some(passkey) = get_pending_passkey()
@@ -371,8 +371,13 @@ impl App for BtTui {
             self.status = format!(" Confirm PIN for {}", self.pairing_device);
         }
 
+        // Skip blocking refreshes during popups/input to keep UI responsive
+        if self.mode != UiMode::Normal {
+            return Ok(());
+        }
+
         // Periodic refresh of paired list (~2 seconds at 100ms tick rate)
-        if self.controller_powered && self.mode != UiMode::PinConfirm {
+        if self.controller_powered {
             self.paired_tick += 1;
             if self.paired_tick >= 20 {
                 self.paired_tick = 0;
@@ -382,7 +387,7 @@ impl App for BtTui {
         }
 
         // Scanning logic
-        if self.scanning && self.mode != UiMode::PinConfirm {
+        if self.scanning {
             self.tick_count += 1;
             self.discovery_tick += 1;
 

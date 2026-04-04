@@ -38,10 +38,13 @@ enum UiMode {
 
 /// Wi-Fi scanning state
 #[derive(Debug, Clone, Copy, Default)]
+#[allow(clippy::struct_excessive_bools)]
 struct WifiState {
     available: bool,
     scanned: bool,
     scanning: bool,
+    /// True between `trigger_scan` and `get_networks` (two-phase non-blocking scan).
+    scan_triggered: bool,
 }
 
 /// Pending refresh after interface toggle (tick-based delay instead of `Thread::sleep`)
@@ -102,6 +105,7 @@ impl NetTui {
                 available: backend.is_some(),
                 scanned: false,
                 scanning: false,
+                scan_triggered: false,
             },
             scan_tick: 0,
             iface_tick: 0,
@@ -128,15 +132,28 @@ impl NetTui {
         Ok(())
     }
 
-    fn scan_wifi_networks(&mut self) {
+    /// Phase 1: Trigger a Wi-Fi scan (non-blocking).
+    fn trigger_wifi_scan(&mut self) {
         let Some(backend) = self.backend else { return };
         if let Some(iface) = self.interfaces.items().iter().find(|i| i.itype == "wlan") {
+            backends::trigger_scan(backend, &iface.name);
             self.wifi.scanning = true;
-            let networks = backends::scan_wifi(backend, &iface.name).unwrap_or_default();
+            self.wifi.scan_triggered = true;
+            self.scan_tick = 0;
+            self.status = " Scanning...".to_string();
+        }
+    }
+
+    /// Phase 2: Fetch scan results (non-blocking, reads cached results).
+    fn fetch_wifi_networks(&mut self) {
+        let Some(backend) = self.backend else { return };
+        if let Some(iface) = self.interfaces.items().iter().find(|i| i.itype == "wlan") {
+            let networks = backends::get_networks(backend, &iface.name).unwrap_or_default();
             let count = networks.len();
             self.networks.set_items(networks);
             self.wifi.scanned = true;
             self.wifi.scanning = false;
+            self.wifi.scan_triggered = false;
             self.status = format!(" {count} networks found");
         }
     }
@@ -199,25 +216,33 @@ impl NetTui {
     }
 
     fn connect_to_network(&mut self) {
-        if let Some(network) = self.networks.selected() {
-            if network.secured {
-                // Show password prompt for secured networks
-                self.pending_ssid = network.ssid.clone();
-                self.password_input.clear();
-                self.mode = UiMode::PasswordInput;
-            } else {
-                // Connect directly for open networks
-                if let (Some(iface), Some(backend)) = (self.selected_wifi_interface(), self.backend)
-                {
-                    match backends::connect_wifi(backend, &iface.name, &network.ssid, None) {
-                        Ok(msg) => {
-                            self.status = format!(" {msg}");
-                            self.pending_refresh.ticks_remaining = 5;
-                        }
-                        Err(e) => self.status = format!(" Failed: {e}"),
-                    }
-                }
+        let Some(network) = self.networks.selected() else {
+            return;
+        };
+        let ssid = network.ssid.clone();
+        let secured = network.secured;
+
+        let Some(iface) = self.selected_wifi_interface() else {
+            return;
+        };
+        let iface_name = iface.name.clone();
+        let Some(backend) = self.backend else { return };
+
+        if secured && !backends::has_stored_credentials(backend, &iface_name, &ssid) {
+            // Secured network without stored credentials — prompt for password
+            self.pending_ssid = ssid;
+            self.password_input.clear();
+            self.mode = UiMode::PasswordInput;
+            return;
+        }
+
+        // Open network or has stored credentials — connect directly
+        match backends::connect_wifi(backend, &iface_name, &ssid, None) {
+            Ok(msg) => {
+                self.status = format!(" {msg}");
+                self.pending_refresh.ticks_remaining = 5;
             }
+            Err(e) => self.status = format!(" Failed: {e}"),
         }
     }
 
@@ -585,7 +610,7 @@ impl NetTui {
             Action::Refresh => {
                 self.refresh()?;
                 if self.current_tab() == 1 {
-                    self.scan_wifi_networks();
+                    self.trigger_wifi_scan();
                 }
             }
             Action::Down => match self.current_tab() {
@@ -641,7 +666,7 @@ impl NetTui {
                 self.sudo_password.clear();
                 self.mode = UiMode::SudoForScan;
             } else {
-                self.scan_wifi_networks();
+                self.trigger_wifi_scan();
             }
         }
 
@@ -654,7 +679,7 @@ impl NetTui {
         match network::run_with_sudo("true", &[], Some(&pass)) {
             Ok(_) => {
                 self.status = " Authenticated".to_string();
-                self.scan_wifi_networks();
+                self.trigger_wifi_scan();
             }
             Err(e) => {
                 self.status = format!(" {e}");
@@ -695,7 +720,7 @@ impl App for NetTui {
         }
 
         // Periodic interface refresh when on interfaces tab (~3s at 100ms tick)
-        if self.current_tab() == 0 {
+        if self.current_tab() == 0 && self.mode == UiMode::Normal {
             self.iface_tick += 1;
             if self.iface_tick >= 30 {
                 self.iface_tick = 0;
@@ -703,14 +728,19 @@ impl App for NetTui {
             }
         }
 
-        // Auto-scan WiFi when on Wi-Fi tab and have enabled wlan interface
-        if self.current_tab() == 1 && self.has_wifi_enabled() && self.mode != UiMode::PasswordInput
-        {
+        // Two-phase non-blocking WiFi scan (only in Normal mode to avoid blocking input)
+        if self.current_tab() == 1 && self.has_wifi_enabled() && self.mode == UiMode::Normal {
             self.scan_tick += 1;
-            // Scan every ~10 seconds (100 ticks at 100ms) to reduce lag
-            if !self.wifi.scanned || self.scan_tick >= 100 {
-                self.scan_tick = 0;
-                self.scan_wifi_networks();
+
+            if self.wifi.scan_triggered {
+                // Phase 2: fetch results after backend-specific delay
+                let delay = self.backend.map_or(5, backends::scan_delay_ticks);
+                if self.scan_tick >= delay {
+                    self.fetch_wifi_networks();
+                }
+            } else if !self.wifi.scanned || self.scan_tick >= 100 {
+                // Phase 1: trigger scan
+                self.trigger_wifi_scan();
             }
         }
         Ok(())

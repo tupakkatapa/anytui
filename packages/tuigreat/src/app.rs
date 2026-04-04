@@ -1,5 +1,5 @@
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
+    event::{self, Event, KeyEventKind},
     execute,
     terminal::{
         EnterAlternateScreen, LeaveAlternateScreen, SetTitle, disable_raw_mode, enable_raw_mode,
@@ -43,23 +43,14 @@ pub trait App {
 pub fn run<A: App>(mut app: A) -> AppResult<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        EnableMouseCapture,
-        SetTitle(app.title())
-    )?;
+    execute!(stdout, EnterAlternateScreen, SetTitle(app.title()))?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     let result = run_loop(&mut terminal, &mut app);
 
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
     result
@@ -74,6 +65,7 @@ fn run_loop<A: App>(
 
         if event::poll(std::time::Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
+            && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
         {
             let action = if app.input_mode() {
                 KeyHandler::parse_input_mode(key)

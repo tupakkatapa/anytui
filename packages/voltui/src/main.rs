@@ -15,7 +15,7 @@ use tuigreat::{
     yank,
 };
 
-use audio::{AudioBackend, Sink, Source};
+use audio::{AppStream, AudioBackend, Sink, Source};
 
 fn volume_bar(volume: u8) -> String {
     let filled = (usize::from(volume) / 10).min(10);
@@ -43,11 +43,18 @@ fn format_source(s: &Source) -> String {
     )
 }
 
+fn format_app_stream(s: &AppStream) -> String {
+    let mute = if s.muted { "M" } else { " " };
+    let bar = volume_bar(s.volume);
+    format!(" {} {} {:3}% {}", mute, bar, s.volume, s.app_name)
+}
+
 struct PwTui {
     theme: Theme,
     tabs: Tabs,
     sinks: SelectableList<Sink>,
     sources: SelectableList<Source>,
+    apps: SelectableList<AppStream>,
     show_help: bool,
     status: String,
     refresh_tick: u32,
@@ -69,6 +76,7 @@ impl PwTui {
     fn new(backend: AudioBackend) -> AppResult<Self> {
         let sinks = backends::get_sinks(backend)?;
         let sources = backends::get_sources(backend)?;
+        let app_streams = backends::get_app_streams(backend)?;
         let combined_modules = if backend == AudioBackend::PulseAudio {
             backends::pactl::get_combined_modules()?
         } else {
@@ -77,6 +85,7 @@ impl PwTui {
 
         let mut tab_names = vec!["Output".to_string(), "Input".to_string()];
         if backend == AudioBackend::PulseAudio {
+            tab_names.push("Apps".to_string());
             tab_names.push("Combine".to_string());
         }
         let app_title = format!("Audio Manager v0.1 ({backend})");
@@ -86,6 +95,7 @@ impl PwTui {
             tabs: Tabs::new(tab_names).with_app_title(&app_title),
             sinks: SelectableList::new(sinks, format_sink),
             sources: SelectableList::new(sources, format_source),
+            apps: SelectableList::new(app_streams, format_app_stream),
             show_help: false,
             status: String::new(),
             refresh_tick: 0,
@@ -102,6 +112,8 @@ impl PwTui {
     fn refresh(&mut self) -> AppResult<()> {
         self.sinks.set_items(backends::get_sinks(self.backend)?);
         self.sources.set_items(backends::get_sources(self.backend)?);
+        self.apps
+            .set_items(backends::get_app_streams(self.backend)?);
         if self.backend == AudioBackend::PulseAudio {
             self.combined_modules = backends::pactl::get_combined_modules()?;
         }
@@ -134,6 +146,13 @@ impl PwTui {
                     self.status = format!(" Volume: {new_vol}%");
                 }
             }
+            2 => {
+                if let Some(app) = self.apps.selected() {
+                    backends::adjust_app_volume(self.backend, app.index, delta)?;
+                    let new_vol = (i16::from(app.volume) + i16::from(delta) * 5).clamp(0, 100);
+                    self.status = format!(" Volume: {new_vol}%");
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -151,6 +170,12 @@ impl PwTui {
                 if let Some(source) = self.sources.selected() {
                     backends::toggle_source_mute(self.backend, &source.name)?;
                     self.status = if source.muted { " Unmuted" } else { " Muted" }.to_string();
+                }
+            }
+            2 => {
+                if let Some(app) = self.apps.selected() {
+                    backends::toggle_app_mute(self.backend, app.index)?;
+                    self.status = if app.muted { " Unmuted" } else { " Muted" }.to_string();
                 }
             }
             _ => {}
@@ -194,6 +219,14 @@ impl PwTui {
             self.status = " PipeWire restarted".to_string();
         } else {
             self.status = " PipeWire restarted (refresh failed)".to_string();
+        }
+    }
+
+    fn combine_tab(&self) -> usize {
+        if self.backend == AudioBackend::PulseAudio {
+            3
+        } else {
+            usize::MAX // unreachable — Combine tab doesn't exist for ALSA
         }
     }
 
@@ -308,8 +341,9 @@ impl PwTui {
 
     fn start_search(&mut self, direction: SearchDirection) {
         match self.current_tab() {
-            0 | 2 => self.sinks.start_search(direction),
+            0 | 3 => self.sinks.start_search(direction),
             1 => self.sources.start_search(direction),
+            2 => self.apps.start_search(direction),
             _ => {}
         }
         self.search_mode = true;
@@ -317,40 +351,45 @@ impl PwTui {
 
     fn search_push(&mut self, c: char) {
         match self.current_tab() {
-            0 | 2 => self.sinks.search_push(c),
+            0 | 3 => self.sinks.search_push(c),
             1 => self.sources.search_push(c),
+            2 => self.apps.search_push(c),
             _ => {}
         }
     }
 
     fn search_pop(&mut self) {
         match self.current_tab() {
-            0 | 2 => self.sinks.search_pop(),
+            0 | 3 => self.sinks.search_pop(),
             1 => self.sources.search_pop(),
+            2 => self.apps.search_pop(),
             _ => {}
         }
     }
 
     fn focused_search_query(&self) -> &str {
         match self.current_tab() {
-            0 | 2 => self.sinks.search_query(),
+            0 | 3 => self.sinks.search_query(),
             1 => self.sources.search_query(),
+            2 => self.apps.search_query(),
             _ => "",
         }
     }
 
     fn focused_match_info(&self) -> Option<(usize, usize)> {
         match self.current_tab() {
-            0 | 2 => self.sinks.match_info(),
+            0 | 3 => self.sinks.match_info(),
             1 => self.sources.match_info(),
+            2 => self.apps.match_info(),
             _ => None,
         }
     }
 
     fn clear_search(&mut self) {
         match self.current_tab() {
-            0 | 2 => self.sinks.clear_search(),
+            0 | 3 => self.sinks.clear_search(),
             1 => self.sources.clear_search(),
+            2 => self.apps.clear_search(),
             _ => {}
         }
         self.search_mode = false;
@@ -358,11 +397,14 @@ impl PwTui {
 
     fn next_match(&mut self) {
         match self.current_tab() {
-            0 | 2 => {
+            0 | 3 => {
                 self.sinks.next_match();
             }
             1 => {
                 self.sources.next_match();
+            }
+            2 => {
+                self.apps.next_match();
             }
             _ => {}
         }
@@ -370,11 +412,14 @@ impl PwTui {
 
     fn prev_match(&mut self) {
         match self.current_tab() {
-            0 | 2 => {
+            0 | 3 => {
                 self.sinks.prev_match();
             }
             1 => {
                 self.sources.prev_match();
+            }
+            2 => {
+                self.apps.prev_match();
             }
             _ => {}
         }
@@ -382,32 +427,36 @@ impl PwTui {
 
     fn half_page_down(&mut self) {
         match self.current_tab() {
-            0 | 2 => self.sinks.half_page_down(),
+            0 | 3 => self.sinks.half_page_down(),
             1 => self.sources.half_page_down(),
+            2 => self.apps.half_page_down(),
             _ => {}
         }
     }
 
     fn half_page_up(&mut self) {
         match self.current_tab() {
-            0 | 2 => self.sinks.half_page_up(),
+            0 | 3 => self.sinks.half_page_up(),
             1 => self.sources.half_page_up(),
+            2 => self.apps.half_page_up(),
             _ => {}
         }
     }
 
     fn full_page_down(&mut self) {
         match self.current_tab() {
-            0 | 2 => self.sinks.page_down(),
+            0 | 3 => self.sinks.page_down(),
             1 => self.sources.page_down(),
+            2 => self.apps.page_down(),
             _ => {}
         }
     }
 
     fn full_page_up(&mut self) {
         match self.current_tab() {
-            0 | 2 => self.sinks.page_up(),
+            0 | 3 => self.sinks.page_up(),
             1 => self.sources.page_up(),
+            2 => self.apps.page_up(),
             _ => {}
         }
     }
@@ -506,14 +555,16 @@ impl PwTui {
         match self.current_tab() {
             0 => " Search Output ",
             1 => " Search Input ",
+            2 => " Search Apps ",
             _ => " Search Sinks ",
         }
     }
 
     fn yank_selected(&mut self) {
         let text = match self.current_tab() {
-            0 | 2 => self.sinks.selected().map(|s| s.description.clone()),
+            0 | 3 => self.sinks.selected().map(|s| s.description.clone()),
             1 => self.sources.selected().map(|s| s.description.clone()),
+            2 => self.apps.selected().map(|s| s.app_name.clone()),
             _ => None,
         };
 
@@ -587,24 +638,26 @@ impl PwTui {
     }
 
     fn handle_navigation(&mut self, action: Action) {
+        let ct = self.combine_tab();
         match action {
             Action::Down => match self.current_tab() {
                 1 => self.sources.next(),
-                2 if self.combine_right_focus => self.combined_next(),
-                2 => self.next_non_combined(),
+                2 => self.apps.next(),
+                t if t == ct && self.combine_right_focus => self.combined_next(),
+                t if t == ct => self.next_non_combined(),
                 0 => self.sinks.next(),
                 _ => {}
             },
             Action::Up => match self.current_tab() {
                 1 => self.sources.previous(),
-                2 if self.combine_right_focus => self.combined_previous(),
-                2 => self.prev_non_combined(),
+                2 => self.apps.previous(),
+                t if t == ct && self.combine_right_focus => self.combined_previous(),
+                t if t == ct => self.prev_non_combined(),
                 0 => self.sinks.previous(),
                 _ => {}
             },
             Action::Left => {
-                // On Combine tab with right focus, move to left panel
-                if self.current_tab() == 2 && self.combine_right_focus {
+                if self.current_tab() == ct && self.combine_right_focus {
                     self.combine_right_focus = false;
                     self.status = " Focus: Select Sinks".to_string();
                 } else {
@@ -612,8 +665,7 @@ impl PwTui {
                 }
             }
             Action::Right => {
-                // On Combine tab with left focus, move to right panel
-                if self.current_tab() == 2 && !self.combine_right_focus {
+                if self.current_tab() == ct && !self.combine_right_focus {
                     self.combine_right_focus = true;
                     self.status = " Focus: Combined Sinks".to_string();
                 } else {
@@ -621,13 +673,15 @@ impl PwTui {
                 }
             }
             Action::Top => match self.current_tab() {
-                0 | 2 => self.sinks.first(),
+                0 | 3 => self.sinks.first(),
                 1 => self.sources.first(),
+                2 => self.apps.first(),
                 _ => {}
             },
             Action::Bottom => match self.current_tab() {
-                0 | 2 => self.sinks.last(),
+                0 | 3 => self.sinks.last(),
                 1 => self.sources.last(),
+                2 => self.apps.last(),
                 _ => {}
             },
             Action::PageUp => self.half_page_up(),
@@ -676,6 +730,10 @@ impl App for PwTui {
     }
 
     fn tick(&mut self) -> AppResult<()> {
+        // Skip blocking refresh during popups/input to keep UI responsive
+        if self.show_help || self.search_mode || self.jump_mode.is_some() {
+            return Ok(());
+        }
         self.refresh_tick += 1;
         // Refresh every ~1 second (10 ticks at 100ms each)
         if self.refresh_tick >= 10 {
@@ -691,8 +749,9 @@ impl App for PwTui {
             match action {
                 Action::Char(c) => {
                     let found = match self.current_tab() {
-                        0 | 2 => self.sinks.jump_to_char(c, forward),
+                        0 | 3 => self.sinks.jump_to_char(c, forward),
                         1 => self.sources.jump_to_char(c, forward),
+                        2 => self.apps.jump_to_char(c, forward),
                         _ => false,
                     };
                     self.status = if found {
@@ -730,7 +789,7 @@ impl App for PwTui {
                     self.set_default();
                     self.refresh()?;
                 }
-                2 => self.toggle_combine_selection(),
+                3 => self.toggle_combine_selection(),
                 _ => {}
             },
             Action::VolumeUp => {
@@ -760,7 +819,7 @@ impl App for PwTui {
             Action::Char('R') if self.backend == AudioBackend::PulseAudio => {
                 self.restart_pipewire();
             }
-            action if self.current_tab() == 2 => self.handle_combine_action(action),
+            action if self.current_tab() == 3 => self.handle_combine_action(action),
             action => self.handle_navigation(action),
         }
         Ok(true)
@@ -780,13 +839,10 @@ impl App for PwTui {
         self.tabs.render(frame, chunks[0], &self.theme);
 
         match self.current_tab() {
-            0 => {
-                self.sinks.render(frame, chunks[1], "", &self.theme, true);
-            }
-            1 => {
-                self.sources.render(frame, chunks[1], "", &self.theme, true);
-            }
-            2 => self.render_combine_tab(frame, chunks[1]),
+            0 => self.sinks.render(frame, chunks[1], "", &self.theme, true),
+            1 => self.sources.render(frame, chunks[1], "", &self.theme, true),
+            2 => self.apps.render(frame, chunks[1], "", &self.theme, true),
+            3 => self.render_combine_tab(frame, chunks[1]),
             _ => {}
         }
 
@@ -799,7 +855,7 @@ impl App for PwTui {
         frame.render_widget(status, chunks[2]);
 
         if self.show_help {
-            let bindings = if self.current_tab() == 2 {
+            let bindings = if self.current_tab() == 3 {
                 vec![
                     ("j/k", "Navigate"),
                     ("h/l", "Switch panel/tab"),
@@ -824,7 +880,6 @@ impl App for PwTui {
                     ("n/N", "Next/Prev match"),
                     ("y", "Yank (copy)"),
                     ("f/F", "Jump to char"),
-                    ("Enter", "Set default"),
                     ("+/-", "Volume"),
                     ("m", "Mute"),
                     ("R", "Restart PipeWire"),

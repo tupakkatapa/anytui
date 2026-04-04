@@ -171,3 +171,52 @@ pub fn parse_iwctl_networks(output: &str, connected: Option<&str>) -> Vec<WifiNe
 pub fn dbm_to_percent(dbm: i32) -> u8 {
     ((dbm + 100).clamp(0, 100) * 100 / 70).clamp(0, 100) as u8
 }
+
+/// Strip ANSI escape sequences from a string.
+#[must_use]
+pub fn strip_ansi(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut in_escape = false;
+    for c in s.chars() {
+        if in_escape {
+            if c.is_ascii_alphabetic() {
+                in_escape = false;
+            }
+        } else if c == '\x1b' {
+            in_escape = true;
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Check if an SSID appears in iwctl known-networks output (already ANSI-stripped).
+#[must_use]
+pub fn is_ssid_in_known_networks(output: &str, ssid: &str) -> bool {
+    let mut in_data = false;
+    let mut header_count = 0;
+
+    for line in output.lines() {
+        if line.contains("────") || line.contains("----") {
+            header_count += 1;
+            if header_count >= 2 {
+                in_data = true;
+            }
+            continue;
+        }
+        if !in_data {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix(ssid)
+            && (rest.is_empty() || rest.starts_with(char::is_whitespace))
+        {
+            return true;
+        }
+    }
+    false
+}
